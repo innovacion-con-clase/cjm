@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IZO | Customer Journey As Is - Diagnóstico</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configuración para usar la fuente Inter de Tailwind -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+    
+    <style>
+        /* Estilos personalizados para la curva de experiencia */
+        #chart-container {
+            height: 300px;
+            width: 100%;
+            overflow-x: scroll;
+            margin-top: 1rem;
+            border-radius: 0.5rem;
+        }
+
+        #chart {
+            min-width: 1200px;
+            height: 100%;
+            position: relative;
+        }
+
+        .experience-line,
+        .effort-line {
+            fill: none;
+            stroke-width: 3;
+            transition: all 0.3s ease;
+        }
+
+        .experience-line {
+            stroke: #06b6d4;
+        }
+
+        .effort-line {
+            stroke: #f59e0b;
+            stroke-dasharray: 5, 5;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 0.75rem;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            z-index: 100;
+            white-space: nowrap;
+            transform: translate(0, -50%);
+        }
+
+        input[type="range"].vertical {
+            writing-mode: bt-lr;
+            -webkit-appearance: slider-vertical;
+            width: 8px;
+            height: 120px;
+            padding: 0 5px;
+            cursor: pointer;
+        }
+
+        .izo-btn {
+            background-color: #06b6d4;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s, transform 0.1s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .izo-btn:hover {
+            background-color: #0e7490;
+            transform: translateY(-1px);
+        }
+
+        .dot-wow {
+            background-color: #10b981;
+        }
+
+        .dot-like {
+            background-color: #06b6d4;
+        }
+
+        .dot-basic {
+            background-color: #f59e0b;
+        }
+
+        .dot-negative {
+            background-color: #ef4444;
+        }
+
+        .dot-hate {
+            background-color: #dc2626;
+        }
+
+        .effort-low {
+            color: #10b981;
+        }
+
+        .effort-medium {
+            color: #f59e0b;
+        }
+
+        .effort-high {
+            color: #ef4444;
+        }
+
+        .main-tab-button {
+            padding: 1rem 2rem;
+            cursor: pointer;
+            border-radius: 0.75rem 0.75rem 0 0;
+            font-weight: 700;
+            font-size: 1.125rem;
+            transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+            margin-right: 0.5rem;
+            border: 2px solid transparent;
+            position: relative;
+            z-index: 20;
+        }
+
+        .main-tab-button.active {
+            background-color: #ffffff;
+            color: #06b6d4;
+            border-top: 2px solid #06b6d4;
+            border-left: 2px solid #06b6d4;
+            border-right: 2px solid #06b6d4;
+            border-bottom-color: #ffffff;
+            box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-content-wrapper {
+            border-top: 2px solid #06b6d4;
+        }
+
+        .sub-tab-button {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-radius: 0.5rem 0.5rem 0 0;
+            font-weight: 600;
+            transition: background-color 0.2s, color 0.2s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .sub-tab-button.active {
+            color: #06b6d4;
+            border-color: #06b6d4;
+            background-color: #f0f9ff;
+        }
+
+        .emoji-overlay {
+            position: absolute;
+            font-size: 1.2rem;
+            pointer-events: none;
+            transform: translate(-50%, -100%);
+            transition: transform 0.3s ease;
+        }
+        /* Clases auxiliares para Tailwind que se agregan dinámicamente */
+        .chart-dot {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .chart-dot:hover {
+             transform: scale(1.1);
+        }
+    </style>
+    
+    <script type="module">
+        // Importaciones modulares de Firebase (Necesarias para la versión 9+)
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+        import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+        // --- Constantes de IZO (Idénticas al original) ---
+        const EXPERIENCE_LEVELS = [
+            { name: "Lo odio (MoP)", value: 0, color: "#dc2626", text: "text-red-700", dot: "dot-hate", emoji: "😠" },
+            { name: "Negativa (MoP)", value: 25, color: "#ef4444", text: "text-red-500", dot: "dot-negative", emoji: "😟" },
+            { name: "Básica", value: 50, color: "#f59e0b", text: "text-amber-500", dot: "dot-basic", emoji: "😐" },
+            { name: "Me Gusta", value: 75, color: "#06b6d4", text: "text-cyan-600", dot: "dot-like", emoji: "😊" },
+            { name: "WOW (MoV)", value: 100, color: "#10b981", text: "text-green-600", dot: "dot-wow", emoji: "✨" }
+        ];
+
+        const EFFORT_LEVELS = [
+            { name: "Alto", value: 100, color: "#ef4444", text: "effort-high" },
+            { name: "Medio", value: 50, color: "#f59e0b", text: "effort-medium" },
+            { name: "Bajo", value: 0, color: "#10b981", text: "effort-low" }
+        ];
+
+        const TO_BE_ATTRIBUTES = [
+            { name: "Esfuerzo Cero (Effortless)", description: "La interacción se resuelve de manera simple y rápida, minimizando el trabajo del cliente." },
+            { name: "Transparencia", description: "El cliente sabe qué esperar, cuándo y por qué, generando confianza y control." },
+            { name: "Personalización", description: "La solución se adapta a las necesidades específicas del cliente, no es genérica." },
+            { name: "Conexión Emocional", description: "La interacción deja una sensación positiva y memorable (ej: alivio, alegría)." }
+        ];
+
+        const JOURNEY_STAGES = [
+            "Antes (Adquisición/Vinculación)",
+            "Durante (Uso/Consumo)",
+            "Después (Soporte/Retención)"
+        ];
+
+        // --- Configuración y Variables de Entorno ---
+        // Se actualiza esta sección con la configuración proporcionada por el usuario (cjm-as)
+        const USER_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyAzFD3gOc36JXgNkDdFMYfcV1zM0b4elY4",
+            authDomain: "cjm-as.firebaseapp.com",
+            projectId: "cjm-as",
+            storageBucket: "cjm-as.firebasestorage.app",
+            messagingSenderId: "774087187955",
+            appId: "1:774087187955:web:b3b939818c4f1228af0686",
+            measurementId: "G-ZYMGSRREK6"
+        };
+
+        // Uso de variables globales proporcionadas por el entorno (Canvas/Inmersive)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : USER_FIREBASE_CONFIG.projectId;
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : USER_FIREBASE_CONFIG;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId = 'Cargando...';
+        let isFirebaseReady = false;
+
+        // --- Almacenamiento Local (Fallback) ---
+        const LOCAL_STORAGE_KEY = 'IZO_CX_TOOL_DATA_V1';
+
+        function loadState() {
+            try {
+                const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (storedData) {
+                    const parsed = JSON.parse(storedData);
+                    // Solo cargar subconjuntos de datos si existen
+                    appState.servicesData = parsed.servicesData || [];
+                    appState.currentServiceId = parsed.currentServiceId || null;
+                    appState.journeyData = parsed.journeyData || [];
+                    appState.interactionCounter = parsed.interactionCounter || 1;
+                    appState.cemScores = parsed.cemScores || appState.cemScores;
+                }
+            } catch (e) {
+                console.error("Error al cargar datos locales:", e);
+            }
+        }
+
+        function saveState() {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({
+                    servicesData: appState.servicesData,
+                    currentServiceId: appState.currentServiceId,
+                    journeyData: appState.journeyData,
+                    interactionCounter: appState.interactionCounter,
+                    cemScores: appState.cemScores,
+                }));
+            } catch (e) {
+                console.error("Error al guardar datos locales:", e);
+            }
+        }
+
+        // --- Almacenamiento de Estado de la Aplicación ---
+        let appState = {
+            journeyData: [],
+            interactionCounter: 1,
+            selectedInteractionForDesign: null,
+            currentServiceId: null,
+            servicesData: [],
+            activeMainTab: 'mapeo',
+            activeSubTab: 'matrix',
+            userId: 'Anon-Local', // Será sobreescrito por el UID de Firebase
+            cemScores: {
+                cliente: 50, estrategia: 50, marca: 50, interaccion: 50, personas: 50,
+                sistemas: 50, medicion: 50, economics: 50, governance: 50
+            }
+        };
+
+        // --- Lógica de Inicialización de Firebase (Modular) ---
+        async function initializeFirebase() {
+            try {
+                // 1. Inicializar App y Servicios
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // 2. Autenticación (Custom Token > Anónimo)
+                await new Promise(resolve => {
+                    const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            appState.userId = user.uid;
+                        } else {
+                            try {
+                                if (initialAuthToken) {
+                                    const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                                    appState.userId = userCredential.user.uid;
+                                } else {
+                                    const anonUser = await signInAnonymously(auth);
+                                    appState.userId = anonUser.user.uid;
+                                }
+                            } catch (e) {
+                                console.error("Error de autenticación:", e);
+                                appState.userId = 'Anon-Fallback';
+                            }
+                        }
+                        authUnsubscribe(); // Detener el listener después de la primera comprobación
+                        resolve();
+                    });
+                });
+
+                isFirebaseReady = true;
+                // 3. Iniciar Listeners de Firestore
+                setupServicesListener();
+                renderUI(); // Renderizado final con datos de Firebase
+
+            } catch (error) {
+                console.error("Falló la inicialización de Firebase. Operando en modo Local Storage. Error:", error);
+                isFirebaseReady = false;
+                renderUI(); // Renderizado final con datos de Local Storage
+            }
+        }
+
+        // --- Lógica de Guardado (Modular) ---
+        async function saveJourneyData() {
+            if (!isFirebaseReady || !appState.currentServiceId) {
+                console.warn("No se puede guardar: Firebase no está listo. Guardando localmente.");
+                saveState();
+                return;
+            }
+
+            try {
+                // Ruta: /artifacts/{appId}/public/data/cx_journeys/{currentServiceId}
+                const docRef = doc(db, `artifacts/${appId}/public/data/cx_journeys`, appState.currentServiceId);
+                
+                // Guardar los datos del journey serializados como string
+                await setDoc(docRef, {
+                    data: JSON.stringify(appState.journeyData),
+                    lastUpdated: new Date().toISOString(),
+                    userId: appState.userId,
+                    interactionCounter: appState.interactionCounter
+                }, { merge: true });
+            } catch (error) {
+                console.error("Error saving data to Firestore:", error);
+            }
+        }
+
+        // --- Listeners de Firestore (Modular) ---
+        let unsubscribeServices = null;
+        let unsubscribeJourney = null;
+
+        function setupServicesListener() {
+            if (!db || !isFirebaseReady) return;
+            if (unsubscribeServices) unsubscribeServices();
+
+            const servicesCol = collection(db, `artifacts/${appId}/public/data/cx_services`);
+
+            unsubscribeServices = onSnapshot(servicesCol, (snapshot) => {
+                const newServicesData = [];
+                snapshot.forEach(doc => {
+                    newServicesData.push({ id: doc.id, ...doc.data() });
+                });
+                appState.servicesData = newServicesData;
+
+                renderServiceSelector(); // Vuelve a dibujar el selector
+
+                // Lógica de selección del servicio activo
+                const serviceExists = appState.servicesData.find(s => s.id === appState.currentServiceId);
+                if (!serviceExists && appState.servicesData.length > 0) {
+                    appState.currentServiceId = appState.servicesData[0].id;
+                } else if (appState.servicesData.length === 0) {
+                    appState.currentServiceId = null;
+                    appState.journeyData = [];
+                    if (unsubscribeJourney) unsubscribeJourney();
+                } else if (!appState.currentServiceId && appState.servicesData.length > 0) {
+                    appState.currentServiceId = appState.servicesData[0].id;
+                }
+                
+                // Configurar el listener del journey para el servicio activo
+                setupJourneyListener();
+            }, (error) => {
+                console.error("Error setting up services listener:", error);
+            });
+        }
+
+        function setupJourneyListener() {
+            if (unsubscribeJourney) unsubscribeJourney();
+
+            if (!db || !appState.currentServiceId || !isFirebaseReady) {
+                appState.journeyData = [];
+                renderUI();
+                return;
+            }
+
+            const docRef = doc(db, `artifacts/${appId}/public/data/cx_journeys`, appState.currentServiceId);
+
+            unsubscribeJourney = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const parsedData = JSON.parse(data.data);
+                    appState.interactionCounter = data.interactionCounter || 1;
+                    
+                    // Solo actualizar si los datos han cambiado para evitar re-renderizados innecesarios
+                    if (JSON.stringify(appState.journeyData) !== JSON.stringify(parsedData)) {
+                        appState.journeyData = parsedData.sort((a, b) => a.id - b.id);
+                        renderUI();
+                    }
+                } else {
+                    appState.journeyData = [];
+                    appState.interactionCounter = 1;
+                    renderUI();
+                }
+            }, (error) => {
+                console.error("Error setting up journey snapshot listener:", error);
+            });
+        }
+        
+        // --- Funciones de Utilidad (Expuestas globalmente) ---
+
+        function renderServiceSelector() {
+            const serviceSelect = document.getElementById('service-selector');
+            const serviceStatus = document.getElementById('service-status');
+            const appContent = document.getElementById('app-content');
+            if (!serviceSelect || !serviceStatus || !appContent) return;
+            serviceSelect.innerHTML = '';
+
+            if (appState.servicesData.length === 0) {
+                serviceSelect.innerHTML = `<option value="" disabled selected>No hay servicios</option>`;
+                serviceStatus.textContent = 'Agregue un servicio para comenzar.';
+                appContent.classList.add('opacity-50', 'pointer-events-none');
+                return;
+            }
+
+            appState.servicesData.forEach(service => {
+                const option = document.createElement('option');
+                option.value = service.id;
+                option.textContent = service.name;
+                if (service.id === appState.currentServiceId) {
+                    option.selected = true;
+                }
+                serviceSelect.appendChild(option);
+            });
+
+            const activeServiceName = appState.servicesData.find(s => s.id === appState.currentServiceId)?.name || 'Seleccione uno';
+            serviceStatus.textContent = `Servicio Activo: ${activeServiceName}`;
+            appContent.classList.remove('opacity-50', 'pointer-events-none');
+            serviceSelect.value = appState.currentServiceId;
+        }
+
+        function renderStageSelector() {
+            const stageSelect = document.getElementById('stage-input');
+            if (!stageSelect) return;
+            if (stageSelect.options.length === 0) {
+                stageSelect.innerHTML = JOURNEY_STAGES.map(stage =>
+                    `<option value="${stage}">${stage}</option>`
+                ).join('');
+            }
+        }
+
+        window.changeService = function(serviceId) {
+            appState.currentServiceId = serviceId;
+            // Manejo de fallback local si Firebase no está listo
+            if (!isFirebaseReady) {
+                const activeService = appState.servicesData.find(s => s.id === serviceId);
+                appState.journeyData = activeService?.journeyData || [];
+                appState.interactionCounter = appState.journeyData.length > 0 ? Math.max(...appState.journeyData.map(i => i.id)) + 1 : 1;
+            }
+            appState.selectedInteractionForDesign = null;
+            saveState();
+            setupJourneyListener();
+            renderUI();
+        }
+
+        window.addService = function() {
+            const serviceNameInput = document.getElementById('new-service-name');
+            const name = serviceNameInput.value.trim();
+            if (!name) return;
+            const serviceId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30) + '-' + Date.now();
+            const newService = {
+                id: serviceId,
+                name: name,
+                creatorId: appState.userId,
+                createdAt: new Date().toISOString(),
+            };
+
+            if (isFirebaseReady) {
+                try {
+                    const docRef = doc(db, `artifacts/${appId}/public/data/cx_services`, serviceId);
+                    setDoc(docRef, newService);
+                } catch (error) {
+                    console.error("Error saving service to Firestore:", error);
+                }
+            } else {
+                appState.servicesData.push({ ...newService, journeyData: [] });
+                appState.currentServiceId = serviceId;
+            }
+
+            appState.currentServiceId = serviceId;
+            appState.journeyData = [];
+            appState.interactionCounter = 1;
+            serviceNameInput.value = '';
+            saveState();
+            renderUI();
+        }
+
+        window.addInteraction = function() {
+            if (!appState.currentServiceId) {
+                document.getElementById('service-status').textContent = 'Error: Cree o seleccione un servicio.';
+                return;
+            }
+            const stageSelect = document.getElementById('stage-input');
+            const interactionInput = document.getElementById('interaction-input');
+            const expValue = parseInt(document.getElementById('exp-slider').value);
+            const effortValue = parseInt(document.getElementById('effort-slider').value);
+            const internalEffortValue = parseInt(document.getElementById('internal-effort-slider').value);
+            const expLevel = getExperienceLevel(expValue);
+            const effortLevel = getEffortLevel(effortValue);
+
+            if (!interactionInput.value.trim() || !expLevel || !effortLevel) {
+                console.error('Error: Por favor, complete todos los campos de la interacción.');
+                return;
+            }
+            const priorityValue = calculatePriority(expValue, effortValue);
+            const matrixResult = getPriorityMatrix(expValue, internalEffortValue);
+            const newInteraction = {
+                id: appState.interactionCounter++,
+                serviceId: appState.currentServiceId,
+                stage: stageSelect.value.trim(),
+                name: interactionInput.value.trim(),
+                experience: expValue,
+                experienceName: expLevel.name,
+                experienceColor: expLevel.color,
+                effort: effortValue,
+                effortName: effortLevel.name,
+                internalEffort: internalEffortValue,
+                priority: priorityValue,
+                priorityMatrix: matrixResult
+            };
+
+            if (expValue <= 50) {
+                newInteraction.design = {
+                    attribute: TO_BE_ATTRIBUTES[0].name,
+                    process: 'Optimizar ruta crítica del proceso.',
+                    technology: 'Simplificar el formulario en el canal web/app.',
+                    people: 'Capacitar agentes en manejo de excepciones.'
+                };
+                if (!appState.selectedInteractionForDesign || newInteraction.priority > appState.selectedInteractionForDesign.priority) {
+                    appState.selectedInteractionForDesign = newInteraction;
+                }
+            }
+
+            appState.journeyData.push(newInteraction);
+            appState.journeyData.sort((a, b) => a.id - b.id);
+            interactionInput.value = '';
+            document.getElementById('exp-slider').value = 50;
+            document.getElementById('effort-slider').value = 50;
+            document.getElementById('internal-effort-slider').value = 50;
+            updateSliderLabels();
+            saveJourneyData();
+            renderUI();
+        }
+
+        window.removeInteraction = function(id) {
+            const numericId = parseInt(id);
+            appState.journeyData = appState.journeyData.filter(item => item.id !== numericId);
+            if (appState.selectedInteractionForDesign && appState.selectedInteractionForDesign.id === numericId) {
+                appState.selectedInteractionForDesign = null;
+            }
+            appState.interactionCounter = appState.journeyData.length > 0 ? Math.max(...appState.journeyData.map(i => i.id)) + 1 : 1;
+            saveJourneyData();
+            renderUI();
+        }
+
+        function calculatePriority(experience, effort) {
+            return (100 - experience) + (effort / 2);
+        }
+
+        function getPriorityMatrix(experience, internalEffort) {
+            const isHighImpact = experience <= 50;
+            const isLowEffort = internalEffort <= 50;
+
+            if (isHighImpact && isLowEffort) return { name: "Quick Win", color: "bg-green-500" };
+            if (isHighImpact && !isLowEffort) return { name: "Proyecto Estratégico", color: "bg-red-500" };
+            if (!isHighImpact && isLowEffort) return { name: "Rellenar / Delegar", color: "bg-yellow-500" };
+            return { name: "Evitar / Tolerable", color: "bg-gray-400" };
+        }
+
+        function getExperienceLevel(value) {
+            return EXPERIENCE_LEVELS.find(l => l.value === value) || EXPERIENCE_LEVELS[2];
+        }
+
+        function getEffortLevel(value) {
+            return EFFORT_LEVELS.find(l => l.value === value) || EFFORT_LEVELS[1];
+        }
+
+        function getInternalEffortName(value) {
+            if (value <= 25) return 'Muy Bajo';
+            if (value <= 50) return 'Bajo';
+            if (value <= 75) return 'Medio';
+            return 'Alto';
+        }
+
+        function renderChart(containerId, data, showEffortCurve, projectionFactor = 0) {
+            const chartDiv = document.getElementById(containerId);
+            const containerDiv = document.getElementById(`${containerId}-container`) || chartDiv.parentElement;
+            if (!chartDiv || !containerDiv) return;
+            chartDiv.innerHTML = '';
+
+            if (data.length === 0) {
+                chartDiv.innerHTML = '<p class="text-center text-gray-500 pt-16">Agregue interacciones para ver el Customer Journey Map.</p>';
+                chartDiv.style.width = '100%';
+                return;
+            }
+
+            const chartWidth = Math.max(containerDiv.offsetWidth - 20, data.length * 200);
+            chartDiv.style.width = `${chartWidth}px`;
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute('width', chartWidth);
+            svg.setAttribute('height', '300');
+
+            const getX = (index) => 100 + index * 200;
+            const getY = (value) => 250 - (value / 100) * 200;
+            const projectY = (value) => (value <= 50 && projectionFactor > 0) ? getY(75) : getY(value);
+
+            [0, 50, 100].forEach(level => {
+                const y = getY(level);
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute('x1', 0);
+                line.setAttribute('y1', y);
+                line.setAttribute('x2', chartWidth);
+                line.setAttribute('y2', y);
+                line.setAttribute('stroke', level === 50 ? '#9ca3af' : '#d1d5db');
+                line.setAttribute('stroke-dasharray', '2,2');
+                svg.appendChild(line);
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute('x', 5);
+                text.setAttribute('y', y - 5);
+                text.setAttribute('font-size', '10');
+                text.setAttribute('fill', '#4b5563');
+                text.textContent = level === 100 ? 'WOW/MoV' : (level === 50 ? 'Básica' : 'Lo odio/MoP');
+                svg.appendChild(text);
+            });
+
+            let expPath = [];
+            let effortPath = [];
+            let projectedPath = [];
+            const elementsToAttach = [];
+
+            data.forEach((item, index) => {
+                const x = getX(index);
+                const yAsIs = getY(item.experience);
+                const yEffort = getY(item.effort);
+                const yToBe = projectY(item.experience);
+                const expLevel = getExperienceLevel(item.experience);
+                const emoji = expLevel ? expLevel.emoji : '❓';
+                expPath.push(`${index === 0 ? 'M' : 'L'} ${x} ${yAsIs}`);
+
+                if (showEffortCurve) {
+                    effortPath.push(`${index === 0 ? 'M' : 'L'} ${x} ${yEffort}`);
+                }
+
+                if (projectionFactor > 0) {
+                    projectedPath.push(`${index === 0 ? 'M' : 'L'} ${x} ${yToBe}`);
+                }
+
+                const circleElements = [];
+                const circleY = (projectionFactor > 0) ? yToBe : yAsIs;
+                const circleFill = (projectionFactor > 0 && item.experience <= 50) ? '#10b981' : item.experienceColor;
+                const circleExp = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circleExp.setAttribute('cx', x);
+                circleExp.setAttribute('cy', circleY);
+                circleExp.setAttribute('r', 6);
+                circleExp.setAttribute('fill', circleFill);
+                circleExp.setAttribute('data-interaction-id', item.id);
+                
+                // --- Aplicación de clases de Tailwind mediante 'class' para evitar InvalidCharacterError ---
+                const isSelected = appState.selectedInteractionForDesign && appState.selectedInteractionForDesign.id === item.id;
+                let baseClasses = 'chart-dot hover:ring-4 ring-cyan-300 cursor-pointer';
+
+                if (containerId === 'chart') {
+                    if (item.experience <= 50) {
+                        baseClasses += ' ring-cyan-500 ring-opacity-50'; 
+                    }
+                    if (isSelected) {
+                        baseClasses = baseClasses.replace('ring-cyan-500 ring-opacity-50', '') + ' ring-offset-2 ring-4 ring-cyan-600';
+                    }
+                    circleExp.setAttribute('class', baseClasses);
+                } else {
+                    circleExp.setAttribute('class', baseClasses); // Usar clases base en el gráfico TO-BE
+                }
+                // --- Fin Aplicación de clases ---
+
+                elementsToAttach.push(circleExp);
+                circleElements.push(circleExp);
+
+                if (showEffortCurve) {
+                    const circleEffort = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    circleEffort.setAttribute('cx', x);
+                    circleEffort.setAttribute('cy', yEffort);
+                    circleEffort.setAttribute('r', 4);
+                    circleEffort.setAttribute('fill', getEffortLevel(item.effort).color);
+                    circleEffort.setAttribute('data-interaction-id', item.id);
+                    elementsToAttach.push(circleEffort);
+                    circleElements.push(circleEffort);
+                }
+
+                if (projectionFactor === 0) {
+                    const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+                    foreignObject.setAttribute('x', x - 12);
+                    foreignObject.setAttribute('y', yAsIs - 22);
+                    foreignObject.setAttribute('width', 24);
+                    foreignObject.setAttribute('height', 24);
+                    foreignObject.innerHTML = `<div class="emoji-overlay text-center" style="position:relative; width:100%; height:100%;">${emoji}</div>`;
+                    elementsToAttach.push(foreignObject);
+                }
+
+                const textStage = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                textStage.setAttribute('x', x);
+                textStage.setAttribute('y', 290);
+                textStage.setAttribute('text-anchor', 'middle');
+                textStage.setAttribute('font-size', '12');
+                textStage.setAttribute('fill', '#4b5563');
+                textStage.textContent = item.stage.substring(0, 15) + (item.stage.length > 15 ? '...' : '');
+                elementsToAttach.push(textStage);
+                const textInteraction = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                textInteraction.setAttribute('x', x);
+                textInteraction.setAttribute('y', 275);
+                textInteraction.setAttribute('text-anchor', 'middle');
+                textInteraction.setAttribute('font-size', '14');
+                textInteraction.setAttribute('font-weight', 'bold');
+                textInteraction.setAttribute('fill', '#1f2937');
+                textInteraction.textContent = item.name.substring(0, 15) + (item.name.length > 15 ? '...' : '');
+                elementsToAttach.push(textInteraction);
+
+                if (containerId === 'chart') {
+                    circleElements.forEach(circle => {
+                        circle.addEventListener('mouseenter', (e) => showTooltip(e, item));
+                        circle.addEventListener('mouseleave', hideTooltip);
+                        if (item.experience <= 50) {
+                            circle.addEventListener('click', () => selectInteractionForDesign(item.id));
+                        }
+                    });
+                }
+            });
+
+            const pathExp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            pathExp.setAttribute('d', expPath.join(' '));
+            pathExp.classList.add('experience-line');
+            pathExp.setAttribute('stroke', (projectionFactor > 0) ? '#9ca3af' : '#06b6d4');
+            pathExp.setAttribute('stroke-dasharray', (projectionFactor > 0) ? '8,4' : '0');
+            svg.appendChild(pathExp);
+
+            if (showEffortCurve) {
+                const pathEffort = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                pathEffort.setAttribute('d', effortPath.join(' '));
+                pathEffort.classList.add('effort-line');
+                svg.appendChild(pathEffort);
+            }
+
+            if (projectionFactor > 0) {
+                const pathProjected = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                pathProjected.setAttribute('d', projectedPath.join(' '));
+                pathProjected.classList.add('experience-line');
+                pathProjected.setAttribute('stroke', '#10b981');
+                pathProjected.setAttribute('stroke-width', '4');
+                svg.appendChild(pathProjected);
+            }
+
+            elementsToAttach.forEach(el => svg.appendChild(el));
+            chartDiv.appendChild(svg);
+        }
+
+        function renderMainChart() {
+            renderChart('chart', appState.journeyData, true, 0);
+        }
+
+        function renderDesignChart() {
+            renderChart('design-chart', appState.journeyData, false, 1);
+        }
+
+        function renderTable() {
+            const tableBody = document.getElementById('journey-table-body');
+            if (!tableBody) return;
+            tableBody.innerHTML = '';
+
+            if (appState.journeyData.length === 0) {
+                const row = tableBody.insertRow();
+                row.innerHTML = `<td colspan="8" class="py-4 text-center text-gray-500">Aún no hay interacciones registradas.</td>`;
+                return;
+            }
+
+            appState.journeyData.forEach(item => {
+                const row = tableBody.insertRow();
+                row.classList.add('border-b', 'hover:bg-cyan-50', 'transition-colors');
+                const matrix = getPriorityMatrix(item.experience, item.internalEffort);
+                row.innerHTML = `
+                    <td class="px-6 py-3 font-semibold text-gray-700">${item.id}</td>
+                    <td class="px-6 py-3 font-medium">${item.stage}</td>
+                    <td class="px-6 py-3">${item.name}</td>
+                    <td class="px-6 py-3 text-center">
+                        <span class="font-semibold ${getExperienceLevel(item.experience).text}">${item.experienceName}</span>
+                    </td>
+                    <td class="px-6 py-3 text-center">
+                        <span class="font-semibold ${getEffortLevel(item.effort).text.replace('effort', 'text')}">${item.effortName}</span>
+                    </td>
+                    <td class="px-6 py-3 text-center">
+                        <span class="font-semibold ${item.internalEffort <= 50 ? 'text-green-600' : 'text-red-600'}">${item.internalEffort}</span>
+                    </td>
+                    <td class="px-6 py-3 text-center">
+                        <span class="${matrix.color} px-2 py-0.5 rounded-full text-white text-xs font-bold">${matrix.name}</span>
+                    </td>
+                    <td class="px-6 py-3 text-center whitespace-nowrap">
+                        <button onclick="selectInteractionForDesign(${item.id})" class="text-cyan-600 hover:text-cyan-900 transition-colors mr-2" title="Diseñar To Be">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-5.464 7.646L.931 16.146a.5.5 0 00.106.843l13.144 2.828a.5.5 0 00.598-.314l3.125-9.375-3.125-9.375a.5.5 0 00-.598-.314l-13.144 2.828a.5.5 0 00-.106.843l7.195 7.195z" />
+                            </svg>
+                        </button>
+                        <button onclick="removeInteraction(${item.id})" class="text-red-600 hover:text-red-900 transition-colors" title="Eliminar Interacción">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </td>
+                `;
+            });
+        }
+
+        function renderQuickWinMatrix() {
+            const matrixContainer = document.getElementById('matrix-content');
+            if (!matrixContainer) return;
+            matrixContainer.innerHTML = '';
+            const matrixData = {
+                "Quick Win": { name: "Quick Win", color: "bg-green-500", count: 0, items: [] },
+                "Proyecto Estratégico": { name: "Proyecto Estratégico", color: "bg-red-500", count: 0, items: [] },
+                "Rellenar / Delegar": { name: "Rellenar / Delegar", color: "bg-yellow-500", count: 0, items: [] },
+                "Evitar / Tolerable": { name: "Evitar / Tolerable", color: "bg-gray-400", count: 0, items: [] }
+            };
+
+            appState.journeyData.forEach(item => {
+                const matrix = getPriorityMatrix(item.experience, item.internalEffort);
+                matrixData[matrix.name].count++;
+                matrixData[matrix.name].items.push(item);
+            });
+
+            const matrixGrid = document.createElement('div');
+            matrixGrid.className = 'grid grid-cols-2 grid-rows-2 h-64 w-full text-white font-bold text-center border-2 border-gray-300 rounded-lg overflow-hidden relative';
+            matrixGrid.innerHTML += `
+                <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -mt-7 text-xs text-gray-700 font-semibold">Alto Esfuerzo Interno</div>
+                <div class="absolute top-0 right-0 transform translate-x-full rotate-90 origin-top-left -mt-2 text-xs text-gray-700 font-semibold">Alto Impacto (MoP)</div>
+                <div class="absolute bottom-0 left-1/2 transform -translate-x-1/2 mb-2 text-xs text-gray-700 font-semibold">Bajo Esfuerzo Interno</div>
+                <div class="absolute top-1/2 left-0 transform -translate-y-1/2 -translate-x-full -ml-2 rotate-90 origin-top-left text-xs text-gray-700 font-semibold">Bajo Impacto (MoV)</div>
+                <div class="border-b-2 border-r-2 border-gray-300"></div>
+                <div class="border-b-2 border-l-2 border-gray-300"></div>
+                <div class="border-t-2 border-r-2 border-gray-300"></div>
+                <div class="border-t-2 border-l-2 border-gray-300"></div>
+            `;
+
+            function createCellInner(data) {
+                const cell = document.createElement('div');
+                cell.className = `${data.color} p-4 flex flex-col justify-center items-center h-full w-full cursor-pointer hover:opacity-90 transition-opacity`;
+                cell.innerHTML = `<span class="text-base">${data.name}</span><span class="text-3xl">${data.count}</span><span class="text-sm font-normal">Interacciones</span>`;
+                cell.title = data.items.map(i => `ID ${i.id}: ${i.name}`).join('\n') || 'Ninguna';
+
+                if (data.count > 0 && (data.name === 'Quick Win' || data.name === 'Proyecto Estratégico')) {
+                    cell.addEventListener('click', () => {
+                        const topItem = data.items.sort((a, b) => b.priority - a.priority)[0];
+                        selectInteractionForDesign(topItem.id);
+                    });
+                }
+                return cell;
+            }
+
+            matrixGrid.children[2].appendChild(createCellInner(matrixData["Quick Win"]));
+            matrixGrid.children[3].appendChild(createCellInner(matrixData["Proyecto Estratégico"]));
+            matrixGrid.children[0].appendChild(createCellInner(matrixData["Rellenar / Delegar"]));
+            matrixGrid.children[1].appendChild(createCellInner(matrixData["Evitar / Tolerable"]));
+            matrixContainer.appendChild(matrixGrid);
+            const legend = document.createElement('div');
+            legend.className = 'mt-10 text-sm text-gray-700 space-y-1 p-4 bg-gray-50 rounded-lg';
+            legend.innerHTML = `
+                <p class="font-extrabold text-base">Ejes de la Matriz:</p>
+                <p>Alto Impacto: Interacciones con Exp. **Básica (50) o Peor** (MoP). Requiere intervención urgente.</p>
+                <p>Bajo Impacto: Interacciones con Exp. **Me Gusta (75) o WOW (100)** (MoV). Mantener y medir.</p>
+                <p>Esfuerzo Interno: **Bajo** ($$ \\le 50 $$) vs. **Alto** ($$ > 50 $$). Mide el Coste/Complejidad de la mejora.</p>
+            `;
+            matrixContainer.appendChild(legend);
+            renderPrioritization();
+        }
+
+        function renderPostItBoard() {
+            const boardContainer = document.getElementById('post-it-board-container');
+            if (!boardContainer) return;
+            boardContainer.innerHTML = '';
+
+            if (appState.journeyData.length === 0) {
+                boardContainer.innerHTML = '<p class="text-center text-gray-500 pt-8">No hay interacciones para visualizar en el tablero. Agregue algunas en la Pestaña 1.</p>';
+                return;
+            }
+
+            const stageData = {
+                'Antes (Adquisición/Vinculación)': [],
+                'Durante (Uso/Consumo)': [],
+                'Después (Soporte/Retención)': [],
+            };
+
+            appState.journeyData.forEach(item => {
+                if (stageData[item.stage]) {
+                    stageData[item.stage].push(item);
+                }
+            });
+
+            JOURNEY_STAGES.forEach(stage => {
+                const column = document.createElement('div');
+                column.className = 'flex-1 min-w-0 md:min-w-[300px] p-4 bg-gray-100 rounded-lg shadow-inner';
+                column.innerHTML = `<h3 class="text-lg font-bold text-gray-700 mb-4 border-b pb-2">${stage} (${stageData[stage]?.length || 0})</h3>`;
+                const postItList = document.createElement('div');
+                postItList.className = 'space-y-3';
+                stageData[stage].forEach(item => {
+                    const level = getExperienceLevel(item.experience);
+                    const isMoP = item.experience <= 50;
+                    const postIt = document.createElement('div');
+                    postIt.className = `p-3 rounded-lg shadow-md border-l-8 ${level.dot.replace('dot', 'bg')} bg-white cursor-pointer hover:shadow-lg transition-shadow border-t border-gray-200`;
+                    postIt.onclick = () => selectInteractionForDesign(item.id);
+
+                    postIt.innerHTML = `
+                        <div class="text-xs text-gray-500 font-medium">ID ${item.id} | ${isMoP ? 'MoP' : 'MoV'}</div>
+                        <p class="font-semibold text-gray-800">${item.name}</p>
+                        <div class="text-sm font-bold mt-1 ${level.text}">${level.emoji} ${level.name}</div>
+                    `;
+                    postItList.appendChild(postIt);
+                });
+                column.appendChild(postItList);
+                boardContainer.appendChild(column);
+            });
+        }
+
+        function renderPrioritization() {
+            const listDiv = document.getElementById('prioritization-list');
+            if (!listDiv) return;
+            listDiv.innerHTML = '';
+
+            if (appState.journeyData.length === 0) {
+                listDiv.innerHTML = '<p class="text-center text-gray-500 pt-4">No hay interacciones para priorizar.</p>';
+                return;
+            }
+
+            const prioritizedItems = appState.journeyData.filter(item => {
+                const matrix = getPriorityMatrix(item.experience, item.internalEffort);
+                return matrix.name === 'Quick Win' || matrix.name === 'Proyecto Estratégico';
+            }).sort((a, b) => b.priority - a.priority);
+
+            prioritizedItems.slice(0, 5).forEach((item) => {
+                const matrix = getPriorityMatrix(item.experience, item.internalEffort);
+                const listItem = document.createElement('li');
+                listItem.classList.add('flex', 'justify-between', 'items-center', 'p-3', 'mb-2', 'bg-white', 'rounded-lg', 'shadow-sm', 'border-l-4', matrix.color.replace('bg', 'border'));
+                listItem.innerHTML = `
+                    <div class="cursor-pointer" onclick="selectInteractionForDesign(${item.id})" title="Haga clic para diseñar To Be">
+                        <p class="text-sm font-semibold text-gray-800">${item.stage}: ${item.name}</p>
+                        <p class="text-xs text-gray-500">Exp: <span style="color:${item.experienceColor}">${item.experienceName}</span> / Prioridad IZO: <span class="font-bold text-cyan-600">${item.priority.toFixed(0)}</span></p>
+                    </div>
+                    <span class="text-xs font-bold text-white px-2 py-1 rounded-full ${matrix.color}">${matrix.name}</span>
+                `;
+                listDiv.appendChild(listItem);
+            });
+
+            if (prioritizedItems.length === 0) {
+                listDiv.innerHTML = '<p class="text-center text-gray-500 pt-4">No se encontraron Momentos de Dolor (Exp. Básica o Peor).</p>';
+            }
+
+            const topQuickWinBtn = document.getElementById('top-quick-win-design-btn');
+            if (topQuickWinBtn) {
+                topQuickWinBtn.onclick = () => {
+                    const topItem = prioritizedItems[0];
+                    if (topItem) selectInteractionForDesign(topItem.id);
+                };
+                topQuickWinBtn.disabled = prioritizedItems.length === 0;
+                topQuickWinBtn.classList.toggle('opacity-50', prioritizedItems.length === 0);
+            }
+        }
+
+        function updateSliderLabels() {
+            const expSlider = document.getElementById('exp-slider');
+            const effortSlider = document.getElementById('effort-slider');
+            const internalEffortSlider = document.getElementById('internal-effort-slider');
+            const expLabel = document.getElementById('exp-label');
+            const effortLabel = document.getElementById('effort-label');
+            const internalEffortLabel = document.getElementById('internal-effort-label');
+            if (!expSlider || !effortSlider || !internalEffortSlider || !expLabel || !effortLabel || !internalEffortLabel) return;
+            const expValue = parseInt(expSlider.value);
+            const effortValue = parseInt(effortSlider.value);
+            // FIX: Corregida la variable `internalEffortSlider.value` que tenía un error tipográfico en la versión anterior.
+            const internalEffortValue = parseInt(internalEffortSlider.value); 
+            const expLevel = getExperienceLevel(expValue);
+            const effortLevel = getEffortLevel(effortValue);
+            const internalEffortName = getInternalEffortName(internalEffortValue);
+            const internalEffortColor = internalEffortValue <= 50 ? 'text-green-500' : 'text-red-500';
+            expLabel.textContent = expLevel ? expLevel.name : '';
+            expLabel.className = `mt-2 text-sm font-bold ${expLevel ? expLevel.text : ''}`;
+            effortLabel.textContent = effortLevel ? effortLevel.name : '';
+            effortLabel.className = `mt-2 text-sm font-bold ${effortLevel ? effortLevel.text : ''}`;
+            internalEffortLabel.textContent = internalEffortName;
+            internalEffortLabel.className = `mt-2 text-sm font-bold ${internalEffortColor}`;
+        }
+
+        window.selectInteractionForDesign = function(id) {
+            const numericId = parseInt(id);
+            if (isNaN(numericId)) return;
+            const interaction = appState.journeyData.find(item => item.id === numericId);
+            if (interaction) {
+                appState.selectedInteractionForDesign = interaction;
+                changeMainTab('diseno');
+            }
+        }
+
+        window.saveDesignChanges = function() {
+            if (!appState.selectedInteractionForDesign) return;
+            const attribute = document.getElementById('design-attribute').value;
+            const process = document.getElementById('design-process').value;
+            const technology = document.getElementById('design-technology').value;
+            const people = document.getElementById('design-people').value;
+            appState.selectedInteractionForDesign.design = appState.selectedInteractionForDesign.design || {};
+            appState.selectedInteractionForDesign.design.attribute = attribute;
+            appState.selectedInteractionForDesign.design.process = process;
+            appState.selectedInteractionForDesign.design.technology = technology;
+            appState.selectedInteractionForDesign.design.people = people;
+            saveState();
+            saveJourneyData();
+            renderUI();
+            const messageDiv = document.getElementById('design-save-message');
+            messageDiv.textContent = `¡Diseño To Be guardado para ID ${appState.selectedInteractionForDesign.id}: ${appState.selectedInteractionForDesign.name}!`;
+            messageDiv.classList.remove('hidden');
+            setTimeout(() => { messageDiv.classList.add('hidden'); }, 3000);
+        }
+
+        function updateDesignPanel() {
+            const select = document.getElementById('design-select');
+            const designPanel = document.getElementById('design-panel');
+            if (!select || !designPanel) return;
+            const mopInteractions = appState.journeyData.filter(item => item.experience <= 50).sort((a, b) => b.priority - a.priority);
+
+            if (mopInteractions.length === 0) {
+                designPanel.innerHTML = '<p class="p-6 text-center text-gray-500">No hay Momentos de Dolor (MoP) o Quick Wins para rediseñar. ¡Buen trabajo!</p>';
+                return;
+            }
+
+            select.innerHTML = mopInteractions.map(item => {
+                const matrix = getPriorityMatrix(item.experience, item.internalEffort);
+                const isSelected = appState.selectedInteractionForDesign && appState.selectedInteractionForDesign.id === item.id;
+                return `<option value="${item.id}" ${isSelected ? 'selected' : ''}>ID ${item.id}: ${item.stage} - ${item.name} (${matrix.name}, Prioridad IZO: ${item.priority.toFixed(0)})</option>`;
+            }).join('');
+
+            if (!appState.selectedInteractionForDesign || appState.selectedInteractionForDesign.experience > 50 || appState.selectedInteractionForDesign.serviceId !== appState.currentServiceId) {
+                appState.selectedInteractionForDesign = mopInteractions[0];
+            }
+            select.value = appState.selectedInteractionForDesign ? appState.selectedInteractionForDesign.id : '';
+
+            select.onchange = (e) => {
+                const id = parseInt(e.target.value);
+                selectInteractionForDesign(id);
+                updateDesignFields();
+                renderDesignChart();
+            };
+            updateDesignFields();
+            renderDesignChart();
+        }
+
+        function updateDesignFields() {
+            const nameElement = document.getElementById('design-name');
+            const asIsElement = document.getElementById('design-as-is');
+            const attributeSelect = document.getElementById('design-attribute');
+
+            if (!appState.selectedInteractionForDesign || !nameElement || !asIsElement || !attributeSelect) return;
+            const current = appState.selectedInteractionForDesign;
+            const design = current.design || {};
+            const attributeName = design.attribute || TO_BE_ATTRIBUTES[0].name;
+            nameElement.textContent = `${current.stage}: ${current.name}`;
+            const expLevel = getExperienceLevel(current.experience);
+            asIsElement.innerHTML = `
+                <span class="font-semibold text-gray-700">Exp. As Is:</span> <span class="${expLevel.text}">${current.experienceName}</span>
+                <span class="ml-4 font-semibold text-gray-700">Esf. Int.:</span> <span class="font-bold ${current.internalEffort <= 50 ? 'text-green-600' : 'text-red-600'}">${current.internalEffort}</span>
+                <span class="ml-4 font-semibold text-gray-700">Matriz:</span> <span class="${current.priorityMatrix.color} px-2 py-0.5 rounded-full text-white text-xs font-bold">${current.priorityMatrix.name}</span>
+            `;
+
+            attributeSelect.innerHTML = TO_BE_ATTRIBUTES.map(attr => `<option value="${attr.name}" ${attr.name === attributeName ? 'selected' : ''}>${attr.name}</option>`).join('');
+            const selectedAttr = TO_BE_ATTRIBUTES.find(a => a.name === attributeSelect.value);
+            document.getElementById('attribute-description').textContent = selectedAttr ? selectedAttr.description : '';
+
+            document.getElementById('design-process').value = design.process || '';
+            document.getElementById('design-technology').value = design.technology || '';
+            document.getElementById('design-people').value = design.people || '';
+            document.getElementById('design-attribute').onchange = updateDesignFields;
+        }
+
+        window.handleCemScoreChange = function(dimension, value) {
+            appState.cemScores[dimension] = parseInt(value);
+            document.getElementById(`cem-label-${dimension}`).textContent = `${value}%`;
+            saveState();
+            renderCemChart();
+        }
+
+        function renderCemSliders() {
+            const container = document.getElementById('cem-sliders');
+            if (!container) return;
+
+            const dimensions = [
+                { id: 'cliente', name: 'Nivel 1: Comprensión del Cliente' },
+                { id: 'estrategia', name: 'Nivel 2: Estrategia de Relación' },
+                { id: 'marca', name: 'Marca' },
+                { id: 'interaccion', name: 'Interacción' },
+                { id: 'personas', name: 'Personas y Cultura' },
+                { id: 'sistemas', name: 'Sistemas y Tecnología' },
+                { id: 'medicion', name: 'Medición' },
+                { id: 'economics', name: 'Economics y Financiero' },
+                { id: 'governance', name: 'Governance' },
+            ];
+
+            container.innerHTML = dimensions.map(dim => `
+                <div class="p-3 bg-white rounded-lg shadow-sm border border-gray-200">
+                    <label for="cem-slider-${dim.id}" class="block text-sm font-semibold text-gray-700 mb-2">${dim.name}</label>
+                    <div class="flex items-center space-x-3">
+                        <input type="range" id="cem-slider-${dim.id}" min="0" max="100" step="10" value="${appState.cemScores[dim.id]}" oninput="handleCemScoreChange('${dim.id}', this.value)" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                        <span id="cem-label-${dim.id}" class="text-sm font-bold w-12 text-center">${appState.cemScores[dim.id]}%</span>
+                    </div>
+                </div>
+            `).join('');
+
+            renderCemChart();
+        }
+
+        function renderCemChart() {
+            const chartDiv = document.getElementById('cem-radar-chart');
+            if (!chartDiv) return;
+            chartDiv.innerHTML = '';
+            const scores = appState.cemScores;
+            const width = 400, height = 400;
+            const centerX = width / 2, centerY = height / 2;
+            const radius = 150;
+            const maxScore = 100;
+            const dimensions = Object.keys(scores);
+            const numDimensions = dimensions.length;
+            const angleStep = (2 * Math.PI) / numDimensions;
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute('width', width);
+            svg.setAttribute('height', height);
+
+            for (let i = 1; i <= 3; i++) {
+                const r = (radius / 3) * i;
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute('cx', centerX);
+                circle.setAttribute('cy', centerY);
+                circle.setAttribute('r', r);
+                circle.setAttribute('fill', 'none');
+                circle.setAttribute('stroke', '#ccc');
+                circle.setAttribute('stroke-width', 1);
+                svg.appendChild(circle);
+            }
+
+            let points = [];
+            dimensions.forEach((dim, index) => {
+                const angle = index * angleStep;
+                const x = centerX + radius * Math.cos(angle - Math.PI / 2);
+                const y = centerY + radius * Math.sin(angle - Math.PI / 2);
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute('x1', centerX);
+                line.setAttribute('y1', centerY);
+                line.setAttribute('x2', x);
+                line.setAttribute('y2', y);
+                line.setAttribute('stroke', '#a0a0a0');
+                line.setAttribute('stroke-width', 1);
+                svg.appendChild(line);
+                const labelX = centerX + (radius + 20) * Math.cos(angle - Math.PI / 2);
+                const labelY = centerY + (radius + 20) * Math.sin(angle - Math.PI / 2);
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute('x', labelX);
+                text.setAttribute('y', labelY);
+                text.setAttribute('font-size', '10');
+                text.setAttribute('fill', '#4b5563');
+                text.setAttribute('text-anchor', (labelX > centerX) ? 'start' : (labelX < centerX) ? 'end' : 'middle');
+                text.textContent = dim.toUpperCase();
+                svg.appendChild(text);
+                const score = scores[dim];
+                const rScore = (score / maxScore) * radius;
+                const scoreX = centerX + rScore * Math.cos(angle - Math.PI / 2);
+                const scoreY = centerY + rScore * Math.sin(angle - Math.PI / 2);
+                points.push(`${scoreX},${scoreY}`);
+            });
+
+            const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+            polygon.setAttribute('points', points.join(' '));
+            polygon.setAttribute('fill', 'rgba(6, 182, 212, 0.4)');
+            polygon.setAttribute('stroke', '#06b6d4');
+            polygon.setAttribute('stroke-width', 2);
+            svg.appendChild(polygon);
+            chartDiv.appendChild(svg);
+        }
+
+        function renderSubTabContent() {
+            const subTabs = ['matrix', 'table'];
+            subTabs.forEach(tab => {
+                const contentEl = document.getElementById(`sub-tab-content-${tab}`);
+                const btnEl = document.getElementById(`sub-tab-button-${tab}`);
+                if (contentEl) contentEl.classList.toggle('hidden', appState.activeSubTab !== tab);
+                if (btnEl) btnEl.classList.toggle('active', appState.activeSubTab === tab);
+            });
+
+            if (appState.activeSubTab === 'table') {
+                renderTable();
+            } else if (appState.activeSubTab === 'matrix') {
+                renderQuickWinMatrix();
+            }
+        }
+
+        function renderMainTabContent() {
+            const tabs = ['mapeo', 'postits', 'priorizacion', 'madurez', 'diseno'];
+            tabs.forEach(tab => {
+                const contentEl = document.getElementById(`main-tab-content-${tab}`);
+                const btnEl = document.getElementById(`main-tab-button-${tab}`);
+                if (contentEl) contentEl.classList.toggle('hidden', appState.activeMainTab !== tab);
+                if (btnEl) btnEl.classList.toggle('active', appState.activeMainTab === tab);
+            });
+        }
+
+        window.changeMainTab = function(tabName) {
+            appState.activeMainTab = tabName;
+            renderMainTabContent();
+            if (tabName === 'mapeo') {
+                renderMainChart();
+            } else if (tabName === 'priorizacion') {
+                renderSubTabContent();
+            } else if (tabName === 'diseno') {
+                updateDesignPanel();
+            } else if (tabName === 'madurez') {
+                renderCemSliders();
+            } else if (tabName === 'postits') {
+                renderPostItBoard();
+            }
+        }
+
+        window.changeSubTab = function(tabName) {
+            appState.activeSubTab = tabName;
+            renderSubTabContent();
+            saveState();
+        }
+
+        window.showTooltip = function(event, item) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `
+                <h4 class="font-bold">${item.name}</h4>
+                <p>Etapa: ${item.stage}</p>
+                <p>Experiencia: ${item.experienceName} (${item.experience})</p>
+                <p>Esfuerzo Cliente: ${item.effortName} (${item.effort})</p>
+                <p>Esfuerzo Interno: ${getInternalEffortName(item.internalEffort)} (${item.internalEffort})</p>
+                <p>Matriz IZO: ${getPriorityMatrix(item.experience, item.internalEffort).name}</p>
+            `;
+            const x = event.clientX + 10;
+            const y = event.clientY + 10;
+            tooltip.style.left = `${x}px`;
+            tooltip.style.top = `${y}px`;
+            tooltip.style.opacity = '1';
+            tooltip.style.transform = 'translate(0, 0)';
+        }
+
+        window.hideTooltip = function() {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.style.opacity = '0';
+            tooltip.style.transform = 'translate(-50%, -50%)';
+        }
+
+        // Función principal de renderizado
+        function renderUI() {
+            renderServiceSelector();
+            renderStageSelector();
+            renderMainTabContent();
+            if (appState.activeMainTab === 'mapeo') {
+                renderMainChart();
+            } else if (appState.activeMainTab === 'postits') {
+                renderPostItBoard();
+            } else if (appState.activeMainTab === 'priorizacion') {
+                renderSubTabContent();
+            } else if (appState.activeMainTab === 'madurez') {
+                renderCemSliders();
+            } else if (appState.activeMainTab === 'diseno') {
+                updateDesignPanel();
+            }
+            updateSliderLabels();
+            document.getElementById('user-id').textContent = appState.userId;
+        }
+
+        // --- Inicialización (Llamada al cargar la ventana) ---
+        window.onload = () => {
+            loadState(); // Cargar estado local primero
+            
+            // Inicialización de sliders y eventos locales
+            updateSliderLabels();
+            document.getElementById('exp-slider')?.addEventListener('input', updateSliderLabels);
+            document.getElementById('effort-slider')?.addEventListener('input', updateSliderLabels);
+            document.getElementById('internal-effort-slider')?.addEventListener('input', updateSliderLabels);
+
+            // Intentar inicializar Firebase (asíncrono)
+            initializeFirebase();
+        };
+
+    </script>
+</head>
+<body class="bg-gray-50 font-sans p-4 md:p-8">
+    <div id="tooltip" class="tooltip"></div>
+    <div class="max-w-7xl mx-auto bg-white p-6 md:p-10 rounded-xl shadow-2xl">
+        <!-- Encabezado y Estado -->
+        <header class="mb-8 border-b pb-4">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-gray-900 flex items-center">
+                <span class="text-5xl text-cyan-600 font-black">i</span>zo
+                <span class="ml-4 text-2xl text-gray-600">Customer Journey As Is: Diagnóstico y Diseño To Be</span>
+            </h1>
+            <p class="text-gray-500 mt-2">
+                Simulador de mapeo de interacciones, priorización y rediseño de experiencias (Metodología IZO).
+            </p>
+            <div class="mt-2 text-xs text-gray-400">
+                <span>Estado: Usuario ID <span id="user-id">Estable/Local</span></span>
+            </div>
+        </header>
+
+        <!-- Gestión de Servicios -->
+        <div class="mb-6 p-4 bg-gray-100 rounded-lg shadow-inner flex flex-col md:flex-row items-start md:items-center justify-between space-y-4 md:space-y-0 md:space-x-4">
+            <!-- Selector de Servicio -->
+            <div class="flex-grow space-y-1 w-full md:w-auto">
+                <label for="service-selector" class="block text-sm font-bold text-gray-700">SERVICIO ACTIVO:</label>
+                <select id="service-selector" onchange="changeService(this.value)" class="w-full md:w-96 border-gray-300 rounded-lg shadow-sm p-2 focus:border-cyan-500 focus:ring-cyan-500">
+                    <option value="" disabled selected>No hay servicios</option>
+                </select>
+                <span id="service-status" class="text-xs text-cyan-700 font-semibold">Agregue un servicio para comenzar.</span>
+            </div>
+
+            <!-- Creador de Servicio -->
+            <div class="flex flex-col space-y-1 w-full md:w-auto">
+                <label for="new-service-name" class="block text-sm font-bold text-gray-700">Crear Nuevo Servicio:</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="new-service-name" placeholder="Ej: Crédito de Vivienda" class="flex-grow border-gray-300 rounded-lg shadow-sm p-2 text-sm focus:border-cyan-500 focus:ring-cyan-500">
+                    <button onclick="addService()" class="izo-btn text-sm px-3 py-2 shadow-md hover:shadow-lg whitespace-nowrap">Crear Servicio</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controles de Pestaña Principal -->
+        <div class="flex border-b-2 border-gray-200 relative z-10">
+            <button id="main-tab-button-mapeo" onclick="changeMainTab('mapeo')" class="main-tab-button active bg-gray-50 hover:bg-white">
+                1. Mapeo y Curva As Is
+            </button>
+            <button id="main-tab-button-postits" onclick="changeMainTab('postits')" class="main-tab-button bg-gray-50 hover:bg-white">
+                2. Tablero de Post-its
+            </button>
+            <button id="main-tab-button-priorizacion" onclick="changeMainTab('priorizacion')" class="main-tab-button bg-gray-50 hover:bg-white">
+                3. Priorización Estratégica
+            </button>
+            <button id="main-tab-button-madurez" onclick="changeMainTab('madurez')" class="main-tab-button bg-gray-50 hover:bg-white">
+                4. Madurez CEM
+            </button>
+            <button id="main-tab-button-diseno" onclick="changeMainTab('diseno')" class="main-tab-button bg-gray-50 hover:bg-white">
+                5. Diseño To Be
+            </button>
+        </div>
+
+        <!-- Contenido de Pestañas Principales -->
+        <div id="app-content" class="p-6 md:p-10 bg-white rounded-b-xl rounded-r-xl shadow-xl tab-content-wrapper">
+
+            <!-- PESTAÑA 1: Mapeo y Curva As Is -->
+            <div id="main-tab-content-mapeo">
+                <!-- Formulario de Adición de Interacción -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10 p-6 bg-cyan-50 rounded-lg shadow-inner">
+                    <div class="col-span-full mb-4">
+                        <h2 class="text-xl font-bold text-cyan-700">1. Registrar Interacción (Punto de Contacto)</h2>
+                    </div>
+
+                    <!-- Inputs de Texto -->
+                    <div class="space-y-4 md:col-span-2">
+                        <label for="stage-input" class="block text-sm font-medium text-gray-700">Etapa del Journey (Ciclo de Vida CX)</label>
+                        <select id="stage-input" class="w-full border-gray-300 rounded-lg shadow-sm p-2 focus:border-cyan-500 focus:ring-cyan-500" required>
+                             <!-- Las opciones se cargan mediante renderStageSelector() en JS -->
+                        </select>
+                    </div>
+                    <div class="space-y-4 md:col-span-2">
+                        <label for="interaction-input" class="block text-sm font-medium text-gray-700">Nombre de Interacción (Punto de Contacto)</label>
+                        <input type="text" id="interaction-input" class="w-full border-gray-300 rounded-lg shadow-sm p-2 focus:border-cyan-500 focus:ring-cyan-500" placeholder="Ej: Recepción de pedido" required>
+                    </div>
+
+                    <!-- Sliders de Evaluación -->
+                    <div class="md:col-span-4 flex flex-wrap items-start space-x-6 bg-white p-4 rounded-lg shadow justify-around">
+                        <!-- Slider Experiencia (Input) -->
+                        <div class="flex flex-col items-center p-2">
+                            <label for="exp-slider" class="text-sm font-medium text-gray-700 mb-2 text-center">Nivel de Experiencia (Impacto Cliente)</label>
+                            <input type="range" id="exp-slider" min="0" max="100" step="25" value="50" class="vertical" orient="vertical">
+                            <span id="exp-label" class="mt-2 text-sm">Básica</span>
+                        </div>
+
+                        <!-- Slider Esfuerzo Cliente (Para Curva de Esfuerzo) -->
+                        <div class="flex flex-col items-center p-2">
+                            <label for="effort-slider" class="text-sm font-medium text-gray-700 mb-2 text-center">Esfuerzo Percibido (Customer Effort)</label>
+                            <input type="range" id="effort-slider" min="0" max="100" step="50" value="50" class="vertical" orient="vertical">
+                            <span id="effort-label" class="mt-2 text-sm">Medio</span>
+                        </div>
+
+                        <!-- Nuevo Slider: Esfuerzo Interno (Para Matriz de Priorización) -->
+                         <div class="flex flex-col items-center p-2">
+                            <label for="internal-effort-slider" class="text-sm font-medium text-gray-700 mb-2 text-center">Esfuerzo Interno (Coste/Complejidad)</label>
+                            <input type="range" id="internal-effort-slider" min="0" max="100" step="25" value="50" class="vertical" orient="vertical">
+                            <span id="internal-effort-label" class="mt-2 text-sm text-amber-500">Bajo</span>
+                        </div>
+
+                        <!-- Botón de Acción -->
+                        <div class="self-end ml-auto p-2">
+                            <button onclick="addInteraction()" class="izo-btn shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-50 min-w-[150px]">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                                </svg>
+                                Añadir Interacción
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sección de Visualización Gráfica -->
+                <section>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">2. Customer Journey Map (Curva As Is)</h2>
+                    <div id="chart-container" class="border border-gray-200 bg-white rounded-lg shadow-lg">
+                        <div id="chart">
+                            <!-- El gráfico se renderizará aquí -->
+                            <p class="text-center text-gray-500 pt-16">Agregue interacciones para ver el Customer Journey Map.</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex flex-wrap gap-4 text-sm text-gray-600">
+                        <div class="flex items-center"><span class="h-3 w-3 rounded-full bg-cyan-600 mr-2"></span>Curva de Experiencia (Nivel de Impacto)</div>
+                        <div class="flex items-center"><span class="h-3 w-3 rounded-full bg-amber-500 mr-2 border-dashed border"></span>Curva de Esfuerzo del Cliente</div>
+                        <div class="flex items-center"><span class="h-2 w-2 rounded-full bg-red-500 mr-2"></span>Clic en MoP/Quick Win para Rediseñar</div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- PESTAÑA 2: Tablero de Post-its -->
+            <div id="main-tab-content-postits" class="hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">2. Tablero de Post-its (Vista Emocional por Ciclo de Vida)</h2>
+                <p class="text-gray-600 mb-6">Vista de alto nivel del Customer Journey, organizada por las etapas **Antes, Durante y Después**. Haga clic en un post-it para diseñar la solución To Be.</p>
+                 <div id="post-it-board-container" class="flex flex-col md:flex-row space-y-6 md:space-y-0 md:space-x-4">
+                    <!-- Columnas de Post-its se renderizarán aquí -->
+                </div>
+            </div>
+
+            <!-- PESTAÑA 3: Priorización Estratégica y Roadmap -->
+            <div id="main-tab-content-priorizacion" class="hidden">
+                <!-- Controles de Sub-Pestaña -->
+                <div class="flex border-b border-gray-200 mb-5">
+                    <button id="sub-tab-button-matrix" onclick="changeSubTab('matrix')" class="sub-tab-button active">
+                        Matriz de Clasificación (2x2)
+                    </button>
+                    <button id="sub-tab-button-table" onclick="changeSubTab('table')" class="sub-tab-button">
+                        Tabla de Interacciones Completa
+                    </button>
+                </div>
+
+                <!-- Contenido de Sub-Pestañas -->
+                <!-- Sub-Pestaña 1: Matriz y Top 5 -->
+                <div id="sub-tab-content-matrix" class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    <div class="lg:col-span-3 p-5 bg-yellow-50 rounded-lg shadow-md">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">3. Matriz de Clasificación Estratégica (Impacto vs Esfuerzo Interno)</h3>
+                        <p class="text-sm text-gray-600 mb-8">
+                            Clasificación automática para definir el foco estratégico de la Fase de Diseño (To Be). Los cuadrantes **Quick Win** y **Proyecto Estratégico** requieren rediseño.
+                        </p>
+                        <div id="matrix-content" class="min-h-64">
+                            <!-- La matriz 2x2 se renderizará aquí -->
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-2 p-5 bg-cyan-50 rounded-lg shadow-md">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">4. Top 5 Iniciativas Prioritarias (Mayor Puntuación IZO)</h3>
+                        <p class="text-sm text-gray-600 mb-4">
+                            Listado de las 5 interacciones con mayor puntuación IZO ($$100 - \text{Exp} + 0.5 \times \text{Esfuerzo Cliente}$$).
+                        </p>
+                         <ul id="prioritization-list" class="space-y-3">
+                            <!-- Lista de priorización se renderizará aquí -->
+                        </ul>
+                        <div class="mt-6 text-center">
+                            <button id="top-quick-win-design-btn"
+                                class="izo-btn shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-50 text-sm disabled:opacity-50">
+                                Rediseñar Quick Win Principal
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Pestaña 2: Tabla Completa -->
+                <div id="sub-tab-content-table" class="hidden">
+                     <h3 class="text-xl font-bold text-gray-800 mb-4">Tabla Completa de Interacciones As Is</h3>
+                    <div class="overflow-x-auto border border-gray-200 rounded-lg shadow-lg">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">#</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Etapa</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interacción</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Exp. Cliente</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Esf. Cliente</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Esf. Int. (0-100)</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Categoría IZO</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="journey-table-body" class="bg-white divide-y divide-gray-200">
+                                <!-- Filas de la tabla se renderizarán aquí -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 4: Madurez CEM -->
+            <div id="main-tab-content-madurez" class="hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">4. Assessment de Madurez CX (Framework CEM IZO)</h2>
+                <p class="text-gray-600 mb-6">Evalúe la capacidad de su organización en las 9 dimensiones clave de madurez (0-100%).</p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Sliders de Evaluación -->
+                    <div id="cem-sliders" class="space-y-4">
+                        <!-- Sliders se renderizarán aquí -->
+                    </div>
+
+                    <!-- Gráfico de Radar -->
+                    <div class="flex flex-col items-center justify-center p-6 bg-white rounded-xl shadow-lg border border-gray-200">
+                         <h3 class="text-xl font-bold text-gray-700 mb-4">Gráfico de Perfil de Madurez</h3>
+                         <div id="cem-radar-chart">
+                             <!-- El gráfico de radar se renderizará aquí -->
+                         </div>
+                         <p class="text-sm text-gray-500 mt-4">Los ejes más cortos indican las mayores debilidades organizativas.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 5: Diseño To Be (Rediseño de Interacción) -->
+            <div id="main-tab-content-diseno" class="hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">5. Rediseño de Interacción (Diseño To Be)</h2>
+
+                <div id="design-panel" class="p-6 bg-blue-50 rounded-lg shadow-inner">
+                    <label for="design-select" class="block text-sm font-medium text-gray-700 mb-2">Seleccione el Momento de Dolor (MoP) o Quick Win a Rediseñar:</label>
+                    <select id="design-select" class="w-full border-gray-300 rounded-lg shadow-sm p-3 mb-6 focus:border-cyan-500 focus:ring-cyan-500"></select>
+
+                    <div class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-cyan-500">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2" id="design-name"></h3>
+                        <p class="text-sm text-gray-500 mb-4" id="design-as-is"></p>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Atributo To Be -->
+                            <div class="space-y-2 md:col-span-2">
+                                <label for="design-attribute" class="block text-sm font-bold text-cyan-700">Atributo de Experiencia Deseado (To Be)</label>
+                                <select id="design-attribute" class="w-full border-gray-300 rounded-lg p-2"></select>
+                                <p class="text-xs text-gray-500 mt-1" id="attribute-description"></p>
+                            </div>
+
+                            <!-- Acciones To Be -->
+                            <div class="space-y-4 md:col-span-2">
+                                <h4 class="text-md font-bold text-gray-700 mt-4 border-b pb-1">Acciones de Rediseño (Modelo IZO: Proceso, Tecnología, Personas)</h4>
+
+                                <label for="design-process" class="block text-sm font-medium text-gray-700">Acción Proceso (Flujo de valor)</label>
+                                <textarea id="design-process" rows="2" class="w-full border-gray-300 rounded-lg p-2 focus:border-cyan-500 focus:ring-cyan-500" placeholder="Ej: Simplificar la ruta crítica del proceso en un 30%"></textarea>
+
+                                <label for="design-technology" class="block text-sm font-medium text-gray-700">Acción Tecnología (Digitalización/Automatización)</label>
+                                <textarea id="design-technology" rows="2" class="w-full border-gray-300 rounded-lg p-2 focus:border-cyan-500 focus:ring-cyan-500" placeholder="Ej: Automatizar la notificación del estado vía API/SMS"></textarea>
+
+                                <label for="design-people" class="block text-sm font-medium text-gray-700">Acción Personas (Cultura/Capacitación)</label>
+                                <textarea id="design-people" rows="2" class="w-full border-gray-300 rounded-lg p-2 focus:border-cyan-500 focus:ring-cyan-500" placeholder="Ej: Entrenar a los agentes en tono empático para dar malas noticias"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 flex justify-between items-center">
+                            <button onclick="saveDesignChanges()" class="izo-btn shadow-lg">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7z" />
+                                    <path fill-rule="evenodd" d="M18 7a2 2 0 012 2v8a2 2 0 01-2 2H2a2 2 0 01-2-2V9a2 2 0 012-2h4V5a3 3 0 013-3h2a3 3 0 013 3v2h4zm-3 8H5v-3h10v3zm0-5H5V9h10v1z" clip-rule="evenodd" />
+                                </svg>
+                                Guardar Diseño To Be
+                            </button>
+                            <span id="design-save-message" class="text-sm font-semibold text-green-600 hidden"></span>
+                        </div>
+                    </div>
+
+                    <!-- Simulación de Curva To Be -->
+                    <div class="mt-8 p-6 bg-white rounded-xl shadow-lg border-t-4 border-green-500">
+                        <h4 class="text-xl font-bold text-gray-800 mb-4">6. Proyección de la Curva To Be (Impacto Esperado)</h4>
+                         <div id="design-chart-container" class="border border-gray-200 bg-white rounded-lg shadow-lg">
+                            <div id="design-chart" class="min-w-full" style="min-width: 1200px; height: 300px;">
+                                <p class="text-center text-gray-500 pt-16">Diseñe acciones para ver la proyección To Be (Verde).</p>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex flex-wrap gap-4 text-sm text-gray-600">
+                            <div class="flex items-center"><span class="h-3 w-3 rounded-full bg-gray-400 mr-2 border-dashed border"></span>Curva As Is (Línea Base)</div>
+                            <div class="flex items-center"><span class="h-3 w-3 rounded-full bg-green-500 mr-2"></span>Curva To Be Proyectada (Me Gusta/75)</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</body>
+</html>
